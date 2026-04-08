@@ -11,9 +11,10 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
 
+# 🔑 НАСТРОЙКИ
 TOKEN = os.environ.get("BOT_TOKEN")
-ADMINS = [8394162540]
-CHANNEL_ID = -1003285603970
+ADMINS = [8394162540]  # твой ID
+CHANNEL_ID = -1003285603970  # канал
 PORT = int(os.environ.get("PORT", 10000))
 
 if not TOKEN:
@@ -24,7 +25,7 @@ logging.basicConfig(level=logging.INFO)
 bot = Bot(token=TOKEN, parse_mode="HTML")
 dp = Dispatcher()
 
-# ===== БД =====
+# 🗄 БАЗА ДАННЫХ
 conn = sqlite3.connect("bot.db", check_same_thread=False)
 cursor = conn.cursor()
 
@@ -45,6 +46,7 @@ CREATE TABLE IF NOT EXISTS settings (
     value TEXT
 )
 ''')
+
 cursor.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('forwarding', '1')")
 conn.commit()
 
@@ -57,15 +59,14 @@ def set_forwarding(val):
     cursor.execute("UPDATE settings SET value=? WHERE key='forwarding'", (val,))
     conn.commit()
 
-# ===== FSM =====
+# 📩 FSM для ответа
 class ReplyState(StatesGroup):
     waiting = State()
 
-# ===== Антиспам =====
 last_msg = {}
 SPAM_DELAY = 5
 
-# ===== Кнопки =====
+# 🔘 КНОПКА
 def forward_kb():
     status = get_forwarding()
     text = "🟢 Выключить пересылку" if status else "🔴 Включить пересылку"
@@ -73,21 +74,22 @@ def forward_kb():
         inline_keyboard=[[InlineKeyboardButton(text=text, callback_data="toggle")]]
     )
 
-# ===== Команды =====
+# 🚀 СТАРТ
 @dp.message(CommandStart())
 async def start(msg: types.Message):
     me = await bot.get_me()
     await msg.answer(
-        f"👋 Привет!\n\n📩 Напиши сюда — сообщение придёт анонимно\n\n"
-        f"🔗 Твоя ссылка:\n<code>https://t.me/{me.username}</code>"
+        f"👋 Привет!\n\n📩 Напиши сюда — сообщение придёт анонимно\n\n🔗 Твоя ссылка:\n<code>https://t.me/{me.username}</code>"
     )
 
+# ⚙️ КОМАНДА АДМИНА
 @dp.message(Command("forward"))
 async def forward_cmd(msg: types.Message):
     if msg.from_user.id not in ADMINS:
         return
     await msg.answer("⚙️ Управление пересылкой", reply_markup=forward_kb())
 
+# 🔄 ПЕРЕКЛЮЧЕНИЕ
 @dp.callback_query(F.data == "toggle")
 async def toggle(cb: types.CallbackQuery):
     if cb.from_user.id not in ADMINS:
@@ -99,27 +101,34 @@ async def toggle(cb: types.CallbackQuery):
     await cb.message.edit_text("⚙️ Настройки обновлены", reply_markup=forward_kb())
     await cb.answer()
 
+# ↩️ ОТВЕТ
 @dp.callback_query(F.data.startswith("reply_"))
 async def reply_handler(cb: types.CallbackQuery, state: FSMContext):
     uid = int(cb.data.split("_")[1])
     await state.update_data(uid=uid)
     await state.set_state(ReplyState.waiting)
+
     await cb.message.answer("✍️ Напиши ответ")
     await cb.answer()
 
 @dp.message(ReplyState.waiting)
 async def send_reply(msg: types.Message, state: FSMContext):
     data = await state.get_data()
+
     try:
         await bot.send_message(data["uid"], f"📬 Ответ:\n\n{msg.text}")
         await msg.answer("✅ Отправлено")
     except:
         await msg.answer("❌ Ошибка")
+
     await state.clear()
 
-# ===== ГЛАВНЫЙ ОБРАБОТЧИК =====
-@dp.message(~F.text.startswith("/") | ~F.text)
+# 📩 ОСНОВНОЙ ОБРАБОТЧИК
+@dp.message()
 async def handle(msg: types.Message):
+    if msg.text and msg.text.startswith("/"):
+        return
+
     user = msg.from_user
     now = time.time()
 
@@ -152,7 +161,7 @@ async def handle(msg: types.Message):
         file_id = msg.video_note.file_id
         extra = f"({msg.video_note.duration} сек)" if msg.video_note.duration else ""
 
-    # ===== В канал =====
+    # 📢 В КАНАЛ
     if get_forwarding():
         try:
             if text:
@@ -172,22 +181,16 @@ async def handle(msg: types.Message):
         except Exception as e:
             logging.error(e)
 
-    # ===== Админу =====
+    # 👑 АДМИНУ
     username = f"@{user.username}" if user.username else "Нет юзернейма"
     full_name = html_lib.escape(user.full_name)
 
-    admin_text = (
-        f"📩 <b>Анонимное сообщение</b>\n\n"
-        f"<b>Имя:</b> {full_name}\n"
-        f"<b>Юзернейм:</b> {username}\n"
-        f"<b>ID:</b> <code>{user.id}</code>\n\n"
-    )
+    admin_text = f"📩 <b>Анонимное сообщение</b>\n\n<b>Имя:</b> {full_name}\n<b>Юзернейм:</b> {username}\n<b>ID:</b> <code>{user.id}</code>\n\n"
 
     if text:
         admin_text += html_lib.escape(text)
     elif media_type:
-        em = "🎨" if media_type == "sticker" else "🎤" if media_type == "voice" else "🔄"
-        admin_text += f"{em} {media_type.replace('_', ' ').title()} {extra}"
+        admin_text += f"{media_type} {extra}"
 
     kb = InlineKeyboardMarkup(
         inline_keyboard=[[InlineKeyboardButton(text="↩️ Ответить анонимно", callback_data=f"reply_{user.id}")]]
@@ -212,8 +215,8 @@ async def handle(msg: types.Message):
         except Exception as e:
             logging.error(e)
 
-    # ===== БД =====
     db_text = text if text else f"{media_type} {extra}".strip()
+
     cursor.execute(
         "INSERT INTO messages (user_id, text, media_type, file_id) VALUES (?, ?, ?, ?)",
         (user.id, db_text, media_type, file_id)
@@ -222,16 +225,21 @@ async def handle(msg: types.Message):
 
     await msg.answer("✅ Отправлено анонимно")
 
-# ===== WEB =====
+# 🌐 ВЕБ-СЕРВЕР (чтобы Render не спал)
+async def handle_web(request):
+    return web.Response(text="OK")
+
 async def start_web():
     app = web.Application()
-    app.router.add_get("/", lambda r: web.Response(text="OK"))
+    app.router.add_get("/", handle_web)
+
     runner = web.AppRunner(app)
     await runner.setup()
+
     site = web.TCPSite(runner, "0.0.0.0", PORT)
     await site.start()
 
-# ===== ЗАПУСК =====
+# ▶️ ЗАПУСК
 async def main():
     await start_web()
     await bot.delete_webhook(drop_pending_updates=True)
